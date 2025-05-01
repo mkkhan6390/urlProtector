@@ -2,9 +2,21 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const shortid = require('shortid');
+const Redis = require('redis');
 
 const app = express();
 app.use(express.json());
+
+// Redis client setup
+const redisClient = Redis.createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+// Connect to Redis
+(async () => {
+    await redisClient.connect();
+    console.log('Redis client connected');
+})().catch(err => console.log('Redis Client Error', err));
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/urlshortener', {
@@ -51,10 +63,20 @@ app.post('/api/shorten', async (req, res) => {
     }
 
     try {
-        // Check if URL already exists
+        // Check Redis cache first
+        const cacheKey = `${url}:${passcode || 'nopass'}`;
+        const cachedUrl = await redisClient.get(cacheKey);
+        
+        if (cachedUrl) {
+            return res.json(JSON.parse(cachedUrl));
+        }
+
+        // Check if URL already exists in MongoDB
         let urlDoc = await Url.findOne({ originalUrl: url, passcode: passcode });
         
         if (urlDoc) {
+            // Cache the result
+            await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
             return res.json(urlDoc);
         }
 
@@ -67,8 +89,11 @@ app.post('/api/shorten', async (req, res) => {
         });
 
         await urlDoc.save();
+        // Cache the new URL
+        await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
         res.json(urlDoc);
     } catch (err) {
+        console.error('Error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -76,16 +101,32 @@ app.post('/api/shorten', async (req, res) => {
 // Serve the verification form
 app.get('/:shortUrl', async (req, res) => {
     try {
-        const urlDoc = await Url.findOne({ shortUrl: req.params.shortUrl });
+        // Check Redis cache first
+        const cacheKey = `shortUrl:${req.params.shortUrl}`;
+        const cachedUrl = await redisClient.get(cacheKey);
         
+        let urlDoc;
+        if (cachedUrl) {
+            urlDoc = JSON.parse(cachedUrl);
+        } else {
+            urlDoc = await Url.findOne({ shortUrl: req.params.shortUrl });
+            if (urlDoc) {
+                // Cache the result for 1 hour
+                await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
+            }
+        }
+
         if (!urlDoc) {
             return res.status(404).json({ error: 'URL not found' });
         }
 
         // If no passcode is required, redirect directly
         if (!urlDoc.passcode) {
+            // Update clicks in MongoDB
+            await Url.findByIdAndUpdate(urlDoc._id, { $inc: { clicks: 1 } });
+            // Update cache
             urlDoc.clicks++;
-            await urlDoc.save();
+            await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
             return res.redirect(urlDoc.originalUrl);
         }
 
@@ -144,6 +185,7 @@ app.get('/:shortUrl', async (req, res) => {
         `;
         res.send(html);
     } catch (err) {
+        console.error('Error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -152,7 +194,18 @@ app.get('/:shortUrl', async (req, res) => {
 app.post('/:shortUrl/verify', express.urlencoded({ extended: true }), async (req, res) => {
     try {
         const { passcode } = req.body;
-        const urlDoc = await Url.findOne({ shortUrl: req.params.shortUrl });
+        const cacheKey = `shortUrl:${req.params.shortUrl}`;
+        const cachedUrl = await redisClient.get(cacheKey);
+        
+        let urlDoc;
+        if (cachedUrl) {
+            urlDoc = JSON.parse(cachedUrl);
+        } else {
+            urlDoc = await Url.findOne({ shortUrl: req.params.shortUrl });
+            if (urlDoc) {
+                await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
+            }
+        }
 
         if (!urlDoc) {
             return res.status(404).json({ error: 'URL not found' });
@@ -162,12 +215,22 @@ app.post('/:shortUrl/verify', express.urlencoded({ extended: true }), async (req
             return res.status(403).send('Invalid passcode. <a href="javascript:history.back()">Go back</a>');
         }
 
+        // Update clicks in MongoDB
+        await Url.findByIdAndUpdate(urlDoc._id, { $inc: { clicks: 1 } });
+        // Update cache
         urlDoc.clicks++;
-        await urlDoc.save();
+        await redisClient.setEx(cacheKey, 3600, JSON.stringify(urlDoc));
         res.redirect(urlDoc.originalUrl);
     } catch (err) {
+        console.error('Error:', err);
         res.status(500).json({ error: 'Server error' });
     }
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+    await redisClient.quit();
+    process.exit(0);
 });
 
 const PORT = process.env.PORT || 5000;

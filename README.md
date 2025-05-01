@@ -1,33 +1,38 @@
-URL Shortener With passcode protection
+# URL Shortener With Passcode Protection
 
-A modern, scalable URL shortening service built with Node.js, Express, MongoDB, and React.
+A modern, scalable URL shortening service built with Node.js, Express, MongoDB, and Redis.
 
-Features
-Shorten long URLs to easily shareable links
-Optional 5-digit passcode protection for URLs
-Modern, responsive React frontend
-Click tracking for shortened URLs
-Copy-to-clipboard functionality
-Real-time URL validation
-MongoDB for persistent storage
-Express.js backend API
-Tech Stack
-Backend
-Node.js
-Express.js
-MongoDB with Mongoose
-ShortID for URL generation
-Dotenv for configuration
-Redis (optional) for caching
-Frontend
-React
-Modern UI with CSS3
-Responsive design
-Client-side validation
-Installation
-Clone the repository:
-bash
-Run
+## Features
+- Shorten long URLs to easily shareable links
+- Optional 5-digit passcode protection for URLs
+- Modern, responsive React frontend
+- Click tracking for shortened URLs
+- Copy-to-clipboard functionality
+- Real-time URL validation
+- MongoDB for persistent storage
+- Redis caching for improved performance
+- Express.js backend API
+
+## Tech Stack
+
+### Backend
+- Node.js
+- Express.js
+- MongoDB with Mongoose
+- Redis for caching
+- ShortID for URL generation
+- Dotenv for configuration
+
+### Frontend
+- React
+- Modern UI with CSS3
+- Responsive design
+- Client-side validation
+
+## Installation
+
+1. Clone the repository:
+```bash
 git clone <repository-url>cd urlshortener
 Install backend dependencies:
 bash
